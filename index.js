@@ -1,25 +1,19 @@
-var http = require('http');
+const express = require('express');
 const puppeteer = require('puppeteer');
-const cron = require('node-cron');
 
-http.createServer(function (req, res) {
-    console.log(`Just got a request at ${req.url}!`)
-    res.write('Yo!');
-    res.end();
-}).listen(process.env.PORT || 3000);
-
+const app = express();
+const port = process.env.PORT || 3000;
 const url = 'https://in.bookmyshow.com/sports/india-vs-pakistan-icc-mens-cwc-2023/ET00367559?groupEventCode=ET00367204';
-let lastSentTimestamp1 = 1696494856000;
+let lastSentTimestamp1 = Date.now();
 let lastSentTimestamp = Date.now();
 
-// Function to send an email
 async function sendWhatsapp(message) {
     try {
         console.info(`In sendWhatsapp`);
         const accountSid = process.env.ACCOUNT_SID;
         const authToken = process.env.AUTH_TOKEN;
         const client = require('twilio')(accountSid, authToken);
-        
+
         client.messages
             .create({
                 body: message,
@@ -45,74 +39,75 @@ async function sendWhatsapp(message) {
     }
 }
 
-// Function to check if a message was sent within the last 60 minutes
 function isMessageSentRecently() {
-    // Read the last sent timestamp from a file (if it exists)
     try {
-      const timestamp = lastSentTimestamp;
-      const currentTime = Date.now();
-      const timeDifference = currentTime - timestamp;
-  
-      // Return true if the message was sent within the last 60 minutes
-      return timeDifference < 60 * 60 * 1000; // 60 minutes in milliseconds
-    } catch (error) {
-      // If the file doesn't exist or there's an error, return false
-      return false;
-    }
-  }
+        const timestamp = lastSentTimestamp;
+        const currentTime = Date.now();
+        const timeDifference = currentTime - timestamp;
 
-  function isMessageNotSentRecently() {
-    // Read the last sent timestamp from a file (if it exists)
-    try {
-      const timestamp = lastSentTimestamp1;
-      const currentTime = Date.now();
-      const timeDifference = currentTime - timestamp;
-  
-      // Return true if the message was sent within the last 60 minutes
-      return timeDifference < 24 * 60 * 60 * 1000; // 60 minutes in milliseconds
+        return timeDifference < 60 * 60 * 1000; 
     } catch (error) {
-      // If the file doesn't exist or there's an error, return false
-      return false;
+        return false;
     }
-  }
-  
-  // Function to update the last sent timestamp
-  function updateLastSentTimestamp() {
+}
+
+function isMessageNotSentRecently() {
+    try {
+        const timestamp = lastSentTimestamp1;
+        const currentTime = Date.now();
+        const timeDifference = currentTime - timestamp;
+
+        return timeDifference < 24 * 60 * 60 * 1000; 
+    } catch (error) {
+        return false;
+    }
+}
+
+function updateLastSentTimestamp() {
     lastSentTimestamp = Date.now();
-  }
+}
 
-  function updateLastSentTimestamp1() {
+function updateLastSentTimestamp1() {
     lastSentTimestamp1 = Date.now();
-  }
+}
 
-cron.schedule('*/ * * * *', async () => {
-    console.log("cron triggerd", Date.now())
+app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+});
+
+app.get("/", (req, res) => {
+    res.status(200).send("App is up!");
+})
+
+app.get('/check', async (req, res) => {
+    console.log('Received a GET request to /check:', new Date());
+    await checkForTickets(res);
+});
+
+async function checkForTickets(res) {
     const browser = await puppeteer.launch({ headless: false });
     const page = await browser.newPage();
+
     await page.goto(url);
-
-    // Define the ID of the element you want to check
-    const elementIdToCheck = '#synopsis-coming-soon-button'; // Replace with the actual ID
-
+    const elementIdToCheck = '#synopsis-coming-soon-button';
     try {
-        // Wait for the element to appear with a timeout of 10 seconds (adjust as needed)
         await page.waitForSelector(elementIdToCheck, { timeout: 10000 });
         if (!isMessageNotSentRecently()) {
             sendWhatsapp('Tickets are not available yet');
             updateLastSentTimestamp1();
         }
-
-        // If the element is found, log a success message
         console.log(`Element with ID '${elementIdToCheck}' is present on the page.`);
+        res.status(200).send('Checked. Tickets not available yet.');
     } catch (error) {
         if (!isMessageSentRecently()) {
             sendWhatsapp('Ticket available - Buy 4 Tickets - ' + url);
-            // If the element is not found within the timeout, log an error message
             console.error(`Element with ID '${elementIdToCheck}' is not present on the page.`);
             updateLastSentTimestamp();
         }
+        res.status(200).send('Checked. Tickets available. Message sent.');
+    } finally {
+        await browser.close();
     }
+}
 
-    await browser.close();
-});
 
